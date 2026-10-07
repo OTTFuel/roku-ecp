@@ -10,7 +10,7 @@ import { readFile, stat, readdir, access } from 'fs/promises';
 import { createHash } from 'crypto';
 import { join, relative } from 'path';
 import { ZipFile } from 'yazl';
-import { EcpHttpError, EcpTimeoutError } from './errors.js';
+import { EcpHttpError, EcpTimeoutError, EcpAuthError } from './errors.js';
 import { digestGet, digestUpload } from './digest.js';
 import { ssdpDiscover, ssdpDiscoverAll } from './ssdp.js';
 
@@ -544,7 +544,7 @@ export class EcpClient {
   async takeScreenshot(): Promise<Buffer> {
     const devUrl = `http://${this.deviceIp}`;
 
-    await digestUpload(
+    const response = await digestUpload(
       `${devUrl}/plugin_inspect`,
       'rokudev',
       this.devPassword,
@@ -552,17 +552,43 @@ export class EcpClient {
       {},
     );
 
-    const png = await digestGet(
-      `${devUrl}/pkgs/dev.png?time=${Date.now()}`,
-      'rokudev',
-      this.devPassword,
+    // Prefer the image named by this capture, rather than a possibly stale
+    // image left behind under the other extension. Only accept known local
+    // screenshot paths; never follow a host supplied in the response.
+    const match = response.match(
+      /(?:src|href)\s*=\s*["'](?:https?:\/\/[^/"']+)?(\/?pkgs\/dev\.(?:png|jpe?g)(?:\?[^"'<>]*)?)["']/i,
     );
+    const reportedPath = match?.[1].replace(/&amp;/g, '&');
+    const candidates = reportedPath
+      ? [reportedPath.startsWith('/') ? reportedPath : `/${reportedPath}`]
+      : ['/pkgs/dev.png', '/pkgs/dev.jpg'];
 
-    if (png.length < 1000) {
-      throw new EcpScreenshotError('Screenshot failed — is a dev channel sideloaded?');
+    for (const [index, candidate] of candidates.entries()) {
+      const url = new URL(candidate, devUrl);
+      url.searchParams.set('time', String(Date.now()));
+      let image: Buffer;
+
+      try {
+        image = await digestGet(url.href, 'rokudev', this.devPassword);
+      } catch (error) {
+        if (error instanceof EcpAuthError && error.status === 404
+          && index < candidates.length - 1) {
+          continue;
+        }
+        throw error;
+      }
+
+      const isPng = image.subarray(0, 8).equals(
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      );
+      const isJpeg = image[0] === 0xff && image[1] === 0xd8 && image[2] === 0xff;
+      if (!isPng && !isJpeg) {
+        throw new EcpScreenshotError('Screenshot response is not a PNG or JPEG image');
+      }
+      return image;
     }
 
-    return png;
+    throw new EcpScreenshotError('Screenshot failed — is a dev channel sideloaded?');
   }
 
   /* ---- SSDP Discovery ---- */
