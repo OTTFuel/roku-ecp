@@ -122,7 +122,7 @@ const perf = await roku.queryChanperf();         // ChanperfSample
 ```typescript
 await roku.sideload('./build.zip');              // deploy dev channel (zip file)
 await roku.sideload('./my-roku-app');            // deploy dev channel (directory)
-const png = await roku.takeScreenshot();         // returns Buffer
+const image = await roku.takeScreenshot();       // PNG or JPEG Buffer
 ```
 
 Both require developer mode. Digest auth uses the configured `devPassword`.
