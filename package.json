@@ -18,7 +18,8 @@
     "test:integration": "vitest run src/__tests__/client.test.ts",
     "test:all": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm test && npm run build"
+    "prepublishOnly": "npm test && npm run build",
+    "prepare": "npm run build"
   },
   "files": [
     "dist/",
